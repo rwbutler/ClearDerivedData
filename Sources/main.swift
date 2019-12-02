@@ -9,75 +9,88 @@
 
 import Foundation
 
-struct Result {
-    let exitCode: Int32
-    let output: String?
-}
-
-private func containsSwitch(_ switch: String) -> Bool {
-    return CommandLine.arguments.contains(where: { $0.trimmingCharacters(in: .whitespacesAndNewlines) == "-\(`switch`)" })
-}
-
-private func expandingTildeInPath(_ path: String) -> String {
-    return path.replacingOccurrences(of: "~", with: FileManager.default.homeDirectoryForCurrentUser.path)
-}
-
-guard !containsSwitch("h") && !containsSwitch("-help") else {
-    print("usage: cdd [-f] [-v]")
-    exit(0)
-}
-
-let deletePermanently = containsSwitch("f")
-let echoOn = containsSwitch("v")
-
-@discardableResult
-private func shell(_ command: String, dir: String? = nil) -> Result {
-    if echoOn {
-        print(command)
+struct ClearDerivedData {
+    
+    private var deletePermanently: Bool = false
+    private var echoOn: Bool = true
+    
+    init() {
+        self.deletePermanently = containsSwitch("f")
+        self.echoOn = containsSwitch("v")
     }
-    let task = Process()
-    let pipe = Pipe()
-    let handle = pipe.fileHandleForReading
-    task.executableURL = URL(fileURLWithPath: "/bin/bash")
-    if let workingDir = dir {
-        task.currentDirectoryURL = URL(fileURLWithPath: workingDir)
+    
+    func run() {
+        guard !containsSwitch("h") && !containsSwitch("-help") else {
+            printUsage()
+            exit(0)
+        }
+        let derivedData = DerivedData()
+        guard !derivedData.isEmpty() else {
+            printMessage("DerivedData empty.", ignoringEcho: true)
+            exit(0)
+        }
+        if deletePermanently {
+            derivedData.delete()
+        } else {
+            derivedData.moveToTrash()
+        }
+        printMessage("DerivedData cleared.", ignoringEcho: true)
+        exit(0)
     }
-    task.arguments = ["-c", command]
-    task.standardOutput = pipe
-    task.launch()
-    task.waitUntilExit()
-    let taskOutputData = handle.readDataToEndOfFile()
-    guard let taskOutput = String(data: taskOutputData, encoding: String.Encoding.utf8) else {
-        handle.closeFile()
-        return Result(exitCode: task.terminationStatus, output: nil)
+    
+    /// Determines whether or not the given parameter was provided as one of the command line args.
+    private func containsSwitch(_ switch: String) -> Bool {
+        return CommandLine.arguments.contains(where: { $0.trimmingCharacters(in: .whitespacesAndNewlines) == "-\(`switch`)" })
     }
-    let output = taskOutput.trimmingCharacters(in: .whitespacesAndNewlines)
-    if output != "", echoOn {
-        print("> \(output)")
+
+    /// Prints a message if echo enabled.
+    private func printMessage(_ message: String, ignoringEcho: Bool = false) {
+        guard echoOn || ignoringEcho else { return }
+        print(message)
     }
-    return Result(exitCode: task.terminationStatus, output: output)
+    
+    /// Prints tool usage information.
+    private func printUsage() {
+        print("usage: cdd [-f] [-v]")
+    }
+    
 }
 
-// Ensure that we can cd successfully
-let path = expandingTildeInPath("~/Library/Developer/Xcode/DerivedData")
-guard let output = shell("pwd", dir: path).output, output == path else {
-    exit(1)
+struct DerivedData {
+    
+    private let fileManager = FileManager.default
+    private static let path = expandingTildeInPath("~/Library/Developer/Xcode/DerivedData")
+    private static let url = URL(fileURLWithPath: path)
+    private let url = DerivedData.url
+    
+    func delete() {
+        removeItem(at: url)
+    }
+    
+    private static func expandingTildeInPath(_ path: String) -> String {
+        return path.replacingOccurrences(of: "~", with: FileManager.default.homeDirectoryForCurrentUser.path)
+    }
+    
+    func isEmpty() -> Bool {
+        guard let urls = try? fileManager.contentsOfDirectory(at: url, includingPropertiesForKeys: nil, options: []) else {
+            return true
+        }
+        return urls.isEmpty
+    }
+    
+    func moveToTrash() {
+        trash(at: url)
+    }
+    
+    private func removeItem(at url: URL) {
+        try? fileManager.removeItem(at: url)
+    }
+    
+    private func trash(at url: URL) {
+        try? fileManager.trashItem(at: url, resultingItemURL: nil)
+    }
+    
 }
 
-// Create dir DerivedData in ~./Trash
-let trash = expandingTildeInPath("~/.Trash")
-if !deletePermanently && shell("mkdir \(trash)/DerivedData > /dev/null 2>&1").exitCode != 0 {
-    shell("rm -rf \(trash)/DerivedData")
-    shell("mkdir \(trash)/DerivedData")
-}
-
-// Determine whether to execute rm or mv
-let verboseSwitch = echoOn ? "v" : ""
-let command = (deletePermanently) ? "rm -rf *" : "mv -f\(verboseSwitch) ./* \(trash)/DerivedData"
-guard let lsOutput = shell("ls", dir: path).output, lsOutput != "" else {
-    print("DerivedData empty.")
-    exit(0)
-}
-print("DerivedData cleared.")
-let exitCode = shell(command, dir: path).exitCode
-exit(exitCode)
+let app = ClearDerivedData()
+app.run()
