@@ -18,6 +18,14 @@ Next install the package:
 brew install cdd
 ```
 
+### Mint
+
+To install using [Mint](https://github.com/yonaskolb/Mint) run the following command:
+
+```bash
+mint install rwbutler/clearderiveddata
+```
+
 ### Manual
 
 To install manually, download the Swift script named `main.swift` and copy to a suitable location locally. Rename to `cdd.swift` (or another convenient name) and then to run either type:
